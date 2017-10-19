@@ -33,7 +33,7 @@ tf.logging.set_verbosity(tf.logging.INFO)
 
 def main(unused_argv):
     # Load training and eval data
-    # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
+    export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
     cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True)
 
     densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
@@ -69,16 +69,16 @@ def main(unused_argv):
         tensors=tensors_to_log, every_n_iter=100)
 
     # Train the model
-    # classifier.train(
-    #     input_fn=lambda: train_input_fn(epochs=150, learning_rate=0.1),
-    #     hooks=[logging_hook]
-    # ).train(
-    #     input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.01),
-    #     hooks=[logging_hook]
-    # ).train(
-    #     input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.001),
-    #     hooks=[logging_hook]
-    # )
+    classifier.train(
+        input_fn=lambda: train_input_fn(epochs=150, learning_rate=0.1),
+        hooks=[logging_hook]
+    ).train(
+        input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.01),
+        hooks=[logging_hook]
+    ).train(
+        input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.001),
+        hooks=[logging_hook]
+    )
 
     # Evaluate the model and print results
     eval_results = classifier.evaluate(input_fn=eval_input_fn)
