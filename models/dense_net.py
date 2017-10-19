@@ -26,11 +26,10 @@ import tensorflow as tf
 
 
 class DenseNet(object):
-    def __init__(self, data_shape, num_classes, growth_rate, depth,
-                 total_blocks, keep_prob, weight_decay, nesterov_momentum,
-                 reduction=1.0,):
+    def __init__(self, num_classes, growth_rate, depth,
+                 total_blocks, keep_prob, reduction,
+                 weight_decay, nesterov_momentum):
         self.num_classes = num_classes
-        self.data_shape = data_shape
         self.growth_rate = growth_rate
         self.depth = depth
         self.first_output_features = growth_rate * 2
@@ -38,22 +37,30 @@ class DenseNet(object):
         self.layers_per_block = (depth - (total_blocks + 1)) // total_blocks // 2
         self.reduction = reduction
         self.keep_prob = keep_prob
+
         self.nesterov_momentum = nesterov_momentum
         self.weight_decay = weight_decay
 
-        print("Build DenseNet-BC model with {} blocks, "
-              "{} bottleneck layers and {} composite layers each.".format(
-                  self.total_blocks, self.layers_per_block,
-                  self.layers_per_block))
+        print("Build DenseNet-BC model with {} blocks, {} bottleneck layers and {} composite layers each.".format(
+            self.total_blocks, self.layers_per_block,
+            self.layers_per_block))
         print("Reduction at transition layers: {:.1f}".format(self.reduction))
 
     def model_fn(self, features, labels, mode):
         training = tf.constant(mode == tf.estimator.ModeKeys.TRAIN)
         growth_rate = self.growth_rate
         layers_per_block = self.layers_per_block
+        input_ = features["image"]
+
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            mean, variance = tf.nn.moments(input_, axes=[0, 1, 2])
+            std = tf.sqrt(variance)
+            input_ = tf.cast(input_, tf.float32) / 255.0
+            input_ = (input_ - mean) / std
+
         with tf.variable_scope("Initial_convolution"):
             output = self.conv2d(
-                features["image"],
+                input_,
                 out_features=self.first_output_features,
                 kernel_size=3)
 
@@ -63,56 +70,59 @@ class DenseNet(object):
             with tf.variable_scope("Transition_after_block_{}".format(block)):
                 output = self.transition_layer(output, block == self.total_blocks - 1, training)
 
-        features_total = int(output.get_shape()[-1])
-        output = tf.reshape(output, [-1, features_total])
-        weights = self.weight_variable_xavier(
-            [features_total, self.num_classes], name='W')
-        bias = self.bias_variable([self.num_classes])
-        logits = tf.matmul(output, weights) + bias
-        # prediction = tf.nn.softmax(logits)
-        #
-        # correct_prediction = tf.equal(
-        #     tf.argmax(prediction, 1),
-        #     tf.argmax(labels, 1))
-        # accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        with tf.variable_scope("FC"):
+            features_total = int(output.get_shape()[-1])
+            output = tf.reshape(output, [-1, features_total])
+            weights = self.weight_variable_xavier(
+                [features_total, self.num_classes], name='W')
+            bias = self.bias_variable([self.num_classes])
+            logits = tf.matmul(output, weights) + bias
 
         predictions = {
             # Generate predictions (for PREDICT and EVAL mode)
             "classes": tf.argmax(input=logits, axis=1),
-            # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
-            # `logging_hook`.
+            # Add `softmax_tensor` to the graph. It is used for PREDICT
             "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
         }
-
-        if mode == tf.estimator.ModeKeys.PREDICT:
-            return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
         # Losses
         onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=10)
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
             logits=logits, labels=onehot_labels))
 
-        if mode == tf.estimator.ModeKeys.EVAL:
-            # Add evaluation metrics (for EVAL mode)
-            eval_metric_ops = {
-                "accuracy": tf.metrics.accuracy(
-                    labels=labels, predictions=predictions["classes"])}
+        # Add evaluation metrics (for EVAL mode)
+        eval_metric_ops = {
+            "accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions["classes"])
+        }
 
+        # self.cross_entropy = cross_entropy
+        l2_loss = tf.add_n(
+            [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
+
+        # optimizer and train step
+        optimizer = tf.train.MomentumOptimizer(
+            features["learning_rate"], self.nesterov_momentum, use_nesterov=True)
+        train_op = optimizer.minimize(
+            loss=loss + l2_loss * self.weight_decay,
+            global_step=tf.train.get_global_step())
+
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+
+        if mode == tf.estimator.ModeKeys.EVAL:
             return tf.estimator.EstimatorSpec(
                 mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
-            # self.cross_entropy = cross_entropy
-            l2_loss = tf.add_n(
-                [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
+            accuracy = tf.reduce_mean(
+                tf.cast(tf.equal(predictions["classes"], labels), tf.float32), name='train_accuracy')
+            tf.summary.scalar("loss_train", loss)
+            tf.summary.scalar("accuracy_train", accuracy)
 
-            # optimizer and train step
-            optimizer = tf.train.MomentumOptimizer(
-                0.1, self.nesterov_momentum, use_nesterov=True)
-            train_op = optimizer.minimize(
-                loss= loss + l2_loss * self.weight_decay,
-                global_step=tf.train.get_global_step())
-            return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
+            return tf.estimator.EstimatorSpec(
+                mode=mode,
+                loss=loss,
+                train_op=train_op)
 
     @staticmethod
     def weight_variable_msra(shape, name):

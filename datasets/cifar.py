@@ -136,7 +136,7 @@ def export_cifar(tar_path, dataset_path, cifar_10=True, tmp_dir='/tmp'):
 
 
 class CIFAR(object):
-    def __init__(self, dataset_path, num_threads=8, batch_size=100, shuffle=True, normalize=True, augment=True):
+    def __init__(self, dataset_path, num_threads=8, batch_size=64, shuffle=True, normalize=True, augment=True):
         # type: (str, int) -> CIFAR
         """
         :param dataset_path: The dataset folder path.
@@ -188,25 +188,34 @@ class CIFAR(object):
     def _read_image_func(self, filename, label):
         image_string = tf.read_file(filename)
         image_decoded = tf.image.decode_image(image_string)
+        image_decoded = tf.reverse(image_decoded, axis=[-1])
         image_float = tf.image.convert_image_dtype(image_decoded, tf.float32)
-
+        image_float.set_shape([32, 32, 3])
         return image_float, label
 
     def _normalize_func(self, image, label):
-        # image_float = (image - self.mean) / self.std
-        image_float = tf.image.per_image_standardization(image)
+        image_float = (image - self.mean) / self.std
+        # image_float = tf.image.per_image_standardization(image)
         return image_float, label
 
     def _augment_func(self, image, label):
-        image_float = tf.image.random_flip_left_right(image)
-        image_float = tf.image.random_flip_up_down(image_float)
-        crop = tf.random_crop(image_float, (28, 28, 3))
-        image_float = tf.image.resize_image_with_crop_or_pad(crop, 32, 32)
+        image_float = tf.random_crop(image, (24, 24, 3))
+        image_float = tf.image.resize_image_with_crop_or_pad(image_float, 32, 32)
+        # image_float = tf.image.random_flip_left_right(image)
+        # image_float = tf.image.random_flip_up_down(image_float)
         return image_float, label
 
+    def normalize(self, images):
+        images_float = tf.cast(images, tf.float32) / 255.0
+        images_float = (images_float - self.mean) / self.std
+        return images_float
+
     def _pre_process(self):
+        # self.train_set_size = self.train_set_size - self.train_set_size % self.batch_size
         if self.shuffle:
             self.train_set = self.train_set.shuffle(buffer_size=self.train_set_size)
+        else:
+            self.train_set = self.train_set.take(self.train_set_size)
 
         def _train_pre_process_fun(filename, label):
             image, label = self._read_image_func(filename, label)
@@ -231,6 +240,9 @@ class CIFAR(object):
             _test_pre_process_fun,
             num_threads=self.num_threads,
             output_buffer_size=self.num_threads + self.batch_size)
+
+        self.train_set = self.train_set.batch(self.batch_size)
+        self.test_set = self.test_set.batch(self.batch_size)
 
 
 def measure_mean_and_std(dataset, meta_path, num_samples):
@@ -270,4 +282,20 @@ if __name__ == '__main__':
     # export_cifar('/backups/datasets/cifar-100-python.tar.gz', '/backups/work/CIFAR100', cifar_10=False)
     # cifar = CIFAR('/backups/work/CIFAR100')
     # measure_mean_and_std(cifar.train_set, os.path.join(cifar.dataset_path, 'meta.json'), cifar.train_set_size)
-    pass
+    cifar = CIFAR('/backups/work/CIFAR10', shuffle=False, normalize=False, augment=True)
+    dataset = cifar.train_set
+    iterator = dataset.make_one_shot_iterator()
+    features, labels = iterator.get_next()
+    with tf.Session() as sess:
+        a = sess.run(features)
+        # mean = sess.run(cifar.mean)
+        # std = sess.run(cifar.std)
+        # b = cv2.imread('/backups/work/CIFAR10/train/0/jumbo_jet_s_001462.png')
+        # b = cv2.cvtColor(b, cv2.COLOR_BGR2RGB) / 255.0
+        # for i in range(b.shape[-1]):
+        #     b[:, :, i] = ((b[:, :, i] - mean[i]) / std[i])
+        a = cv2.cvtColor(a, cv2.COLOR_RGB2BGR)
+        cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
+        cv2.imshow('image', a)
+        cv2.waitKeyEx(0)
+        pass

@@ -28,7 +28,7 @@ import tensorflow as tf
 from datasets.cifar import CIFAR, export_cifar
 from models.dense_net import DenseNet
 
-# tf.logging.set_verbosity(tf.logging.INFO)
+tf.logging.set_verbosity(tf.logging.INFO)
 
 
 def main(unused_argv):
@@ -36,45 +36,51 @@ def main(unused_argv):
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
     cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True)
 
-    densenet = DenseNet((32, 32, 3), 10, 12, 40, 3, 0.8, 1e-4, 0.9, 0.5)
+    densenet = DenseNet(10, 12, 40, 3, 0.8, 0.5, 1e-4, 0.9)
 
-    def train_input_fn():
+    def train_input_fn(epochs, learning_rate):
         dataset = cifar.train_set
-        dataset = dataset.batch(64)
-        dataset = dataset.repeat(10)
+        dataset = dataset.repeat(epochs)
         iterator = dataset.make_one_shot_iterator()
         features, labels = iterator.get_next()
-        return {'image': features}, labels
+        return {'image': features, 'learning_rate': learning_rate}, labels
 
     def eval_input_fn():
         dataset = cifar.train_set
-        dataset = dataset.batch(64)
         dataset = dataset.repeat(1)
         iterator = dataset.make_one_shot_iterator()
         features, labels = iterator.get_next()
         return {'image': features}, labels
 
     # Create the Estimator
+    sess_config = tf.ConfigProto()
+    sess_config.gpu_options.allow_growth = True
+    config = tf.estimator.RunConfig().replace(session_config=sess_config)
+
     classifier = tf.estimator.Estimator(
-        model_fn=densenet.model_fn, model_dir="/tmp/cifar_model")
+        model_fn=densenet.model_fn, model_dir="/tmp/cifar_model", config=config)
 
     # Set up logging for predictions
     # Log the values in the "Softmax" tensor with label "probabilities"
-    tensors_to_log = {"probabilities": "softmax_tensor"}
+    tensors_to_log = {"accuracy": "train_accuracy"}
     logging_hook = tf.train.LoggingTensorHook(
-        tensors=tensors_to_log, every_n_iter=50)
+        tensors=tensors_to_log, every_n_iter=100)
 
-    # classifier.train(input_fn=train_input_fn)
+    # Train the model
+    classifier.train(
+        input_fn=lambda: train_input_fn(epochs=150, learning_rate=0.1),
+        hooks=[logging_hook]
+    ).train(
+        input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.01),
+        hooks=[logging_hook]
+    ).train(
+        input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.001),
+        hooks=[logging_hook]
+    )
 
-    for i in range(300):
-        # Train the model
-        classifier.train(
-            input_fn=train_input_fn,
-            hooks=[logging_hook])
-
-        # Evaluate the model and print results
-        eval_results = classifier.evaluate(input_fn=eval_input_fn)
-        print(eval_results)
+    # Evaluate the model and print results
+    eval_results = classifier.evaluate(input_fn=eval_input_fn)
+    print(eval_results)
 
 
 if __name__ == "__main__":
