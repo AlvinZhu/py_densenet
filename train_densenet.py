@@ -22,11 +22,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
+import argparse
+
 import numpy as np
 import tensorflow as tf
 
 from datasets.cifar import CIFAR, export_cifar
 from models.dense_net import DenseNet
+
+FLAGS = None
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -86,4 +91,7 @@ def main(unused_argv):
 
 
 if __name__ == "__main__":
-    tf.app.run()
+    parser = argparse.ArgumentParser()
+
+    FLAGS, unparsed = parser.parse_known_args()
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
