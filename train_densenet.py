@@ -36,7 +36,9 @@ def main(unused_argv):
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
     cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True)
 
-    densenet = DenseNet(10, 12, 40, 3, 0.8, 0.5, 1e-4, 0.9)
+    densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
+                        total_blocks=3, keep_prob=0.8, reduction=0.5,
+                        weight_decay=1e-4, nesterov_momentum=0.9)
 
     def train_input_fn(epochs, learning_rate):
         dataset = cifar.train_set
@@ -58,7 +60,7 @@ def main(unused_argv):
     config = tf.estimator.RunConfig().replace(session_config=sess_config)
 
     classifier = tf.estimator.Estimator(
-        model_fn=densenet.model_fn, model_dir="/tmp/cifar_model", config=config)
+        model_fn=densenet.cifar_model_fn, model_dir="/tmp/cifar_model", config=config)
 
     # Set up logging for predictions
     # Log the values in the "Softmax" tensor with label "probabilities"
@@ -67,16 +69,16 @@ def main(unused_argv):
         tensors=tensors_to_log, every_n_iter=100)
 
     # Train the model
-    classifier.train(
-        input_fn=lambda: train_input_fn(epochs=150, learning_rate=0.1),
-        hooks=[logging_hook]
-    ).train(
-        input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.01),
-        hooks=[logging_hook]
-    ).train(
-        input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.001),
-        hooks=[logging_hook]
-    )
+    # classifier.train(
+    #     input_fn=lambda: train_input_fn(epochs=150, learning_rate=0.1),
+    #     hooks=[logging_hook]
+    # ).train(
+    #     input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.01),
+    #     hooks=[logging_hook]
+    # ).train(
+    #     input_fn=lambda: train_input_fn(epochs=75, learning_rate=0.001),
+    #     hooks=[logging_hook]
+    # )
 
     # Evaluate the model and print results
     eval_results = classifier.evaluate(input_fn=eval_input_fn)

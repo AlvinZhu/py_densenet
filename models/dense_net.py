@@ -26,30 +26,36 @@ import tensorflow as tf
 
 
 class DenseNet(object):
-    def __init__(self, num_classes, growth_rate, depth,
+    def __init__(self, num_classes, growth_rate, depth, bc_mode,
                  total_blocks, keep_prob, reduction,
                  weight_decay, nesterov_momentum):
         self.num_classes = num_classes
         self.growth_rate = growth_rate
         self.depth = depth
-        self.first_output_features = growth_rate * 2
+        self.bc_mode = bc_mode
+        self.first_output_features = growth_rate * 2 if bc_mode else 16
         self.total_blocks = total_blocks
-        self.layers_per_block = (depth - (total_blocks + 1)) // total_blocks // 2
+        self.layers_per_block = (depth - (total_blocks + 1)) // total_blocks
+        if self.bc_mode:
+            self.layers_per_block = self.layers_per_block // 2
         self.reduction = reduction
         self.keep_prob = keep_prob
 
         self.nesterov_momentum = nesterov_momentum
         self.weight_decay = weight_decay
 
-        print("Build DenseNet-BC model with {} blocks, {} bottleneck layers and {} composite layers each.".format(
+        print("Build DenseNet model with {} blocks, {} bottleneck layers and {} composite layers each.".format(
             self.total_blocks, self.layers_per_block,
             self.layers_per_block))
         print("Reduction at transition layers: {:.1f}".format(self.reduction))
 
-    def model_fn(self, features, labels, mode):
+    def cifar_model_fn(self, features, labels, mode):
+        layers_per_block = (self.depth - 4) // 3
+        if self.bc_mode:
+            layers_per_block = layers_per_block // 2
+
         training = tf.constant(mode == tf.estimator.ModeKeys.TRAIN)
-        growth_rate = self.growth_rate
-        layers_per_block = self.layers_per_block
+
         input_ = features["image"]
 
         if mode == tf.estimator.ModeKeys.PREDICT:
@@ -66,7 +72,7 @@ class DenseNet(object):
 
         for block in range(self.total_blocks):
             with tf.variable_scope("Block_{}".format(block)):
-                output = self.add_dense_block(output, growth_rate, layers_per_block, training)
+                output = self.add_dense_block(output, self.growth_rate, layers_per_block, training)
             with tf.variable_scope("Transition_after_block_{}".format(block)):
                 output = self.transition_layer(output, block == self.total_blocks - 1, training)
 
@@ -95,17 +101,6 @@ class DenseNet(object):
             "accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions["classes"])
         }
 
-        # self.cross_entropy = cross_entropy
-        l2_loss = tf.add_n(
-            [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
-
-        # optimizer and train step
-        optimizer = tf.train.MomentumOptimizer(
-            features["learning_rate"], self.nesterov_momentum, use_nesterov=True)
-        train_op = optimizer.minimize(
-            loss=loss + l2_loss * self.weight_decay,
-            global_step=tf.train.get_global_step())
-
         if mode == tf.estimator.ModeKeys.PREDICT:
             return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
@@ -114,6 +109,17 @@ class DenseNet(object):
                 mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
+            # self.cross_entropy = cross_entropy
+            l2_loss = tf.add_n(
+                [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
+
+            # optimizer and train step
+            optimizer = tf.train.MomentumOptimizer(
+                features["learning_rate"], self.nesterov_momentum, use_nesterov=True)
+            train_op = optimizer.minimize(
+                loss=loss + l2_loss * self.weight_decay,
+                global_step=tf.train.get_global_step())
+
             accuracy = tf.reduce_mean(
                 tf.cast(tf.equal(predictions["classes"], labels), tf.float32), name='train_accuracy')
             tf.summary.scalar("loss_train", loss)
@@ -213,9 +219,12 @@ class DenseNet(object):
         input with output from composite function.
         """
         # call composite function with 3x3 kernel
-        bottleneck_out = self.bottleneck(input_, growth_rate, training)
+        if self.bc_mode:
+            output = self.bottleneck(input_, growth_rate, training)
+        else:
+            output = input_
         comp_out = self.composite_function(
-            bottleneck_out, growth_rate, training, kernel_size=3)
+            output, growth_rate, training, kernel_size=3)
         # concatenate _input with out from composite function
         output = tf.concat(axis=3, values=(input_, comp_out))
 
@@ -241,7 +250,10 @@ class DenseNet(object):
             last_pool_kernel = int(output.get_shape()[-2])
             output = self.avg_pool(output, k=last_pool_kernel)
         else:
-            out_features = int(int(input_.get_shape()[-1]) * self.reduction)
+            if self.bc_mode:
+                out_features = int(int(input_.get_shape()[-1]) * self.reduction)
+            else:
+                out_features = int(input_.get_shape()[-1])
             # convolution 1x1
             output = self.conv2d(
                 output, out_features=out_features, kernel_size=1)
