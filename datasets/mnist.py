@@ -16,7 +16,7 @@
 # limitations under the License.
 # ==============================================================================
 
-"""CIFAR dataset"""
+"""MNIST dataset"""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -135,10 +135,9 @@ def export_cifar(tar_path, dataset_path, cifar_10=True, tmp_dir='/tmp'):
     shutil.rmtree(tmp_path)
 
 
-class CIFAR(object):
-    def __init__(self, dataset_path, num_threads=8, batch_size=64,
+class MNIST(object):
+    def __init__(self, dataset_path, num_threads=8, batch_size=128,
                  shuffle=True, normalize=True, augment=True, one_hot=True):
-        # type: (str, int) -> CIFAR
         """
         :param dataset_path: The dataset folder path.
         :param num_threads: number of threads.
@@ -167,10 +166,12 @@ class CIFAR(object):
         self.num_classes = len(self.label_names)
 
         all_files = {'train': [], 'test': []}
+        labels = {'train': [], 'test': []}
         for subset in all_files.keys():
             for i in range(self.num_classes):
                 folder = os.path.join(self.dataset_path, subset, str(i))
                 files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.png')]
+                labels[subset] += [i] * len(files)
                 all_files[subset] += files
 
         train_set_size = len(all_files['train'])
@@ -180,13 +181,13 @@ class CIFAR(object):
         np.random.shuffle(shuffle_index)
 
         train_files = tf.constant(np.array(all_files['train'])[shuffle_index])
-        train_labels = tf.constant(np.arange(self.num_classes).repeat(train_set_size // self.num_classes)[shuffle_index])
+        train_labels = tf.constant(np.array(labels['train'])[shuffle_index])
 
         shuffle_index = np.arange(test_set_size)
         np.random.shuffle(shuffle_index)
 
         test_files = tf.constant(np.array(all_files['test'])[shuffle_index])
-        test_labels = tf.constant(np.arange(self.num_classes).repeat(test_set_size // self.num_classes)[shuffle_index])
+        test_labels = tf.constant(np.array(labels['test'])[shuffle_index])
 
         self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
@@ -219,9 +220,8 @@ class CIFAR(object):
     def _read_image_func(self, filename, label):
         image_string = tf.read_file(filename)
         image_decoded = tf.image.decode_image(image_string)
-        image_decoded = tf.reverse(image_decoded, axis=[-1])
+        # image_float = tf.cast(image_decoded, tf.float32)
         image_float = tf.image.convert_image_dtype(image_decoded, tf.float32)
-        image_float.set_shape([32, 32, 3])
         return image_float, label
 
     def _normalize_func(self, image, label):
@@ -230,14 +230,14 @@ class CIFAR(object):
         return image_float, label
 
     def _augment_func(self, image, label):
-        image_float = tf.random_crop(image, (24, 24, 3))
-        image_float = tf.image.resize_image_with_crop_or_pad(image_float, 32, 32)
+        image = tf.random_crop(image, (20, 20, 1))
+        image = tf.image.resize_image_with_crop_or_pad(image, 28, 28)
         # image_float = tf.image.random_flip_left_right(image)
         # image_float = tf.image.random_flip_up_down(image_float)
-        return image_float, label
+        return image, label
 
     def _one_hot_func(self, image, label):
-        onehot_label = tf.one_hot(indices=tf.cast(label, tf.int32), depth=self.num_classes)
+        onehot_label = tf.one_hot(indices=tf.cast(label, tf.int32), depth=10)
         return image, onehot_label
 
     def _pre_process(self):
@@ -275,8 +275,8 @@ class CIFAR(object):
             num_threads=self.num_threads,
             output_buffer_size=self.num_threads + self.batch_size)
 
-        self.train_set = self.train_set.batch(self.batch_size)
-        self.test_set = self.test_set.batch(self.batch_size)
+        self.train_set = self.train_set.batch(100)
+        self.test_set = self.test_set.batch(128)
 
 
 def main():
@@ -286,28 +286,26 @@ def main():
     # export_cifar('/backups/datasets/cifar-100-python.tar.gz', '/backups/work/CIFAR100', cifar_10=False)
     # cifar = CIFAR('/backups/work/CIFAR100')
     # measure_mean_and_std(cifar.train_set, os.path.join(cifar.dataset_path, 'meta.json'), cifar.train_set_size)
-    cifar = CIFAR('/backups/work/CIFAR10', shuffle=False, normalize=True, augment=True, one_hot=False)
-    dataset = cifar.train_set
+    mnist = MNIST('/backups/work/mnist', shuffle=True, normalize=True, augment=True, one_hot=False)
+    dataset = mnist.train_set
     dataset = dataset.repeat(10)
     iterator = dataset.make_one_shot_iterator()
     features, labels = iterator.get_next()
     with tf.Session() as sess:
-        for i in range(10):
-            images = sess.run(labels)
-            print(images.shape)
-            print(images)
+        for n in range(2):
+            images, labels = sess.run([features, labels])
             # mean = sess.run(cifar.mean)
             # std = sess.run(cifar.std)
             # b = cv2.imread('/backups/work/CIFAR10/train/0/jumbo_jet_s_001462.png')
             # b = cv2.cvtColor(b, cv2.COLOR_BGR2RGB) / 255.0
             # for i in range(b.shape[-1]):
             #     b[:, :, i] = ((b[:, :, i] - mean[i]) / std[i])
-            # for image in images:
-            #     print(images)
+            for i in range(labels.shape[0]):
+                print(labels[i])
                 # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                # cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
-                # cv2.imshow('image', image)
-                # cv2.waitKeyEx(300)
+                cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
+                cv2.imshow('image', images[i])
+                cv2.waitKeyEx(0)
             pass
 
 

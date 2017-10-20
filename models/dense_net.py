@@ -83,22 +83,22 @@ class DenseNet(object):
                 [features_total, self.num_classes], name='W')
             bias = self.bias_variable([self.num_classes])
             logits = tf.matmul(output, weights) + bias
+            prediction = tf.nn.softmax(logits)
 
         predictions = {
             # Generate predictions (for PREDICT and EVAL mode)
             "classes": tf.argmax(input=logits, axis=1),
             # Add `softmax_tensor` to the graph. It is used for PREDICT
-            "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
+            "probabilities": prediction
         }
 
         # Losses
-        onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=10)
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-            logits=logits, labels=onehot_labels))
+            logits=logits, labels=labels))
 
         # Add evaluation metrics (for EVAL mode)
         eval_metric_ops = {
-            "accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions["classes"])
+            "accuracy": tf.metrics.accuracy(labels=tf.argmax(labels, 1), predictions=tf.argmax(prediction, 1))
         }
 
         if mode == tf.estimator.ModeKeys.PREDICT:
@@ -120,10 +120,13 @@ class DenseNet(object):
                 loss=loss + l2_loss * self.weight_decay,
                 global_step=tf.train.get_global_step())
 
-            accuracy = tf.reduce_mean(
-                tf.cast(tf.equal(predictions["classes"], labels), tf.float32), name='train_accuracy')
-            tf.summary.scalar("loss_train", loss)
-            tf.summary.scalar("accuracy_train", accuracy)
+            correct_prediction = tf.equal(
+                tf.argmax(prediction, 1),
+                tf.argmax(labels, 1))
+
+            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='train_accuracy')
+            tf.summary.scalar("loss_per_batch", loss)
+            tf.summary.scalar("accuracy_per_batch", accuracy)
 
             return tf.estimator.EstimatorSpec(
                 mode=mode,
@@ -184,7 +187,7 @@ class DenseNet(object):
             output = input_
         return output
 
-    def composite_function(self, input_, out_features, training, kernel_size=3):
+    def composite_function(self, input_, out_features, training, kernel_size):
         """Function from paper H_l that performs:
         - batch normalization
         - ReLU nonlinearity

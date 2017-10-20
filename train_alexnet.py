@@ -16,7 +16,7 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Train DenseNet"""
+"""Train AlexNet"""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -29,7 +29,7 @@ import numpy as np
 import tensorflow as tf
 
 from datasets.cifar import CIFAR, export_cifar
-from models.dense_net import DenseNet
+from models.alex_net import AlexNet
 
 FLAGS = None
 
@@ -39,11 +39,9 @@ tf.logging.set_verbosity(tf.logging.INFO)
 def main(unused_argv):
     # Load training and eval data
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
-    cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True)
+    cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True, one_hot=False)
 
-    densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
-                        total_blocks=3, keep_prob=0.8, reduction=0.5,
-                        weight_decay=1e-4, nesterov_momentum=0.9)
+    alexnet = AlexNet(num_classes=10)
 
     def train_input_fn(epochs, learning_rate):
         dataset = cifar.train_set
@@ -53,9 +51,8 @@ def main(unused_argv):
         return {'image': features, 'learning_rate': learning_rate}, labels
 
     def eval_input_fn():
-        dataset = cifar.test_set
+        dataset = cifar.train_set
         dataset = dataset.repeat(1)
-        dataset = dataset.skip(16)
         iterator = dataset.make_one_shot_iterator()
         features, labels = iterator.get_next()
         return {'image': features}, labels
@@ -66,38 +63,12 @@ def main(unused_argv):
     config = tf.estimator.RunConfig().replace(session_config=sess_config)
 
     classifier = tf.estimator.Estimator(
-        model_fn=densenet.cifar_model_fn, model_dir="/tmp/logs/cifar_model", config=config)
-
-    # Set up logging for predictions
-    # Log the values in the "Softmax" tensor with label "probabilities"
-    tensors_to_log = {"accuracy": "train_accuracy"}
-    logging_hook = tf.train.LoggingTensorHook(
-        tensors=tensors_to_log, every_n_iter=100)
+        model_fn=alexnet.cifar_model_fn, model_dir="/tmp/logs/cifar_model_alexnet", config=config)
 
     # Train the model
-    for i in range(150):
-        classifier.train(
-            input_fn=lambda: train_input_fn(epochs=1, learning_rate=0.1),
-            hooks=[logging_hook]
-        )
-        eval_results = classifier.evaluate(input_fn=eval_input_fn)
-        print(eval_results)
-
-    for i in range(75):
-        classifier.train(
-            input_fn=lambda: train_input_fn(epochs=1, learning_rate=0.01),
-            hooks=[logging_hook]
-        )
-        eval_results = classifier.evaluate(input_fn=eval_input_fn)
-        print(eval_results)
-
-    for i in range(75):
-        classifier.train(
-            input_fn=lambda: train_input_fn(epochs=1, learning_rate=0.001),
-            hooks=[logging_hook]
-        )
-        eval_results = classifier.evaluate(input_fn=eval_input_fn)
-        print(eval_results)
+    classifier.train(
+        input_fn=lambda: train_input_fn(epochs=150, learning_rate=0.1)
+    )
 
     # Evaluate the model and print results
     eval_results = classifier.evaluate(input_fn=eval_input_fn)
