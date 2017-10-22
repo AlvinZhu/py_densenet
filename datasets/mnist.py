@@ -23,10 +23,6 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import shutil
-import pickle
-import tarfile
-import json
 
 import numpy as np
 import tensorflow as tf
@@ -217,34 +213,20 @@ class MNIST(object):
 
 def main():
     tf.logging.set_verbosity(tf.logging.ERROR)
-    # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
-    # cifar = CIFAR('/backups/work/CIFAR10')
-    # export_cifar('/backups/datasets/cifar-100-python.tar.gz', '/backups/work/CIFAR100', cifar_10=False)
-    # cifar = CIFAR('/backups/work/CIFAR100')
-    # measure_mean_and_std(cifar.train_set, os.path.join(cifar.dataset_path, 'meta.json'), cifar.train_set_size)
-    mnist = MNIST('/backups/work/mnist', shuffle=True, normalize=True, augment=True, one_hot=False)
-    dataset = mnist.train_set
-    dataset = dataset.repeat(10)
+    # export_mnist('/home/alvin/Work/MNIST_data', '/home/alvin/Work/MNIST')
+    mnist = MNIST('/home/alvin/Work/MNIST', shuffle=True, normalize=True, augment=True, one_hot=False)
+    dataset = mnist.test_set
+    dataset = dataset.batch(10000)
     iterator = dataset.make_one_shot_iterator()
-    features, labels = iterator.get_next()
+    features, label = iterator.get_next()
     with tf.Session() as sess:
-        for n in range(2):
-            images, labels = sess.run([features, labels])
-            # mean = sess.run(cifar.mean)
-            # std = sess.run(cifar.std)
-            # b = cv2.imread('/backups/work/CIFAR10/train/0/jumbo_jet_s_001462.png')
-            # b = cv2.cvtColor(b, cv2.COLOR_BGR2RGB) / 255.0
-            # for i in range(b.shape[-1]):
-            #     b[:, :, i] = ((b[:, :, i] - mean[i]) / std[i])
-            for i in range(labels.shape[0]):
-                print(labels[i])
-                # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
-                cv2.imshow('image', images[i])
-                cv2.waitKeyEx(0)
-            pass
+        images_path, labels = sess.run([features, label])
+        for image_path, label in zip(images_path, labels):
+            if not os.path.dirname(image_path).endswith(str(label)):
+                print(image_path)
+                print(label)
 
 
 if __name__ == '__main__':
-    export_mnist('/tmp/MNIST_data', '/home/alvin/Work/MNIST')
-    # main()
+    main()
+

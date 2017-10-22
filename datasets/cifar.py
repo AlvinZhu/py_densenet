@@ -156,8 +156,8 @@ class CIFAR(object):
         self.one_hot = one_hot
 
         self._load()
-        # self._measure_mean_and_std()
-        # self._pre_process()
+        self._measure_mean_and_std()
+        self._pre_process()
 
     def _load(self):
         """Load dataset from folder which contains images."""
@@ -180,7 +180,8 @@ class CIFAR(object):
         np.random.shuffle(shuffle_index)
 
         train_files = tf.constant(np.array(all_files['train'])[shuffle_index])
-        train_labels = tf.constant(np.arange(self.num_classes).repeat(train_set_size // self.num_classes)[shuffle_index])
+        train_labels = tf.constant(
+            np.arange(self.num_classes).repeat(train_set_size // self.num_classes)[shuffle_index])
 
         shuffle_index = np.arange(test_set_size)
         np.random.shuffle(shuffle_index)
@@ -198,7 +199,7 @@ class CIFAR(object):
         """
         measure mean and std of random samples from train set. number of samples is min(50000, train_set_size).
         """
-        num_samples = min(50000, self.train_set_size)
+        num_samples = min(100000, self.train_set_size)
         dataset = self.train_set.shuffle(buffer_size=num_samples)
         dataset = dataset.map(
             self._read_image_func,
@@ -281,10 +282,6 @@ class CIFAR(object):
 
 def main():
     tf.logging.set_verbosity(tf.logging.ERROR)
-    # cifar = CIFAR('/backups/work/CIFAR10')
-    # export_cifar('/backups/datasets/cifar-100-python.tar.gz', '/backups/work/CIFAR100', cifar_10=False)
-    # cifar = CIFAR('/backups/work/CIFAR100')
-    # measure_mean_and_std(cifar.train_set, os.path.join(cifar.dataset_path, 'meta.json'), cifar.train_set_size)
     # export_cifar('/home/alvin/Work/cifar-10-python.tar.gz', '/home/alvin/Work/CIFAR10')
     cifar = CIFAR('/home/alvin/Work/CIFAR10', shuffle=False, normalize=False, augment=False, one_hot=False)
     dataset = cifar.test_set
