@@ -180,13 +180,15 @@ class CIFAR(object):
         np.random.shuffle(shuffle_index)
 
         train_files = tf.constant(np.array(all_files['train'])[shuffle_index])
-        train_labels = tf.constant(np.arange(self.num_classes).repeat(train_set_size // self.num_classes)[shuffle_index])
+        train_labels = tf.constant(
+            np.arange(self.num_classes).repeat(train_set_size // self.num_classes)[shuffle_index])
 
         shuffle_index = np.arange(test_set_size)
         np.random.shuffle(shuffle_index)
 
         test_files = tf.constant(np.array(all_files['test'])[shuffle_index])
-        test_labels = tf.constant(np.arange(self.num_classes).repeat(test_set_size // self.num_classes)[shuffle_index])
+        test_labels = tf.constant(
+            np.arange(self.num_classes).repeat(test_set_size // self.num_classes)[shuffle_index])
 
         self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
@@ -203,7 +205,7 @@ class CIFAR(object):
         dataset = dataset.map(
             self._read_image_func,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
         dataset = dataset.batch(num_samples)
         iterator = dataset.make_one_shot_iterator()
         images, labels = iterator.get_next()
@@ -211,7 +213,10 @@ class CIFAR(object):
         mean, variance = tf.nn.moments(images, axes=[0, 1, 2])
         std = tf.sqrt(variance)
 
-        with tf.Session() as sess:
+        sess_config = tf.ConfigProto()
+        sess_config.gpu_options.allow_growth = True
+
+        with tf.Session(config=sess_config) as sess:
             out_mean, out_std = sess.run([mean, std])
         self.mean = tf.constant(out_mean)
         self.std = tf.constant(out_std)
@@ -230,9 +235,9 @@ class CIFAR(object):
         return image_float, label
 
     def _augment_func(self, image, label):
-        image_float = tf.random_crop(image, (24, 24, 3))
-        image_float = tf.image.resize_image_with_crop_or_pad(image_float, 32, 32)
-        # image_float = tf.image.random_flip_left_right(image)
+        image_float = tf.image.resize_image_with_crop_or_pad(image, 40, 40)
+        image_float = tf.random_crop(image_float, (32, 32, 3))
+        image_float = tf.image.random_flip_left_right(image_float)
         # image_float = tf.image.random_flip_up_down(image_float)
         return image_float, label
 
@@ -268,12 +273,12 @@ class CIFAR(object):
         self.train_set = self.train_set.map(
             _train_pre_process_fun,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
 
         self.test_set = self.test_set.map(
             _test_pre_process_fun,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
 
         self.train_set = self.train_set.batch(self.batch_size)
         self.test_set = self.test_set.batch(self.batch_size)
@@ -282,33 +287,17 @@ class CIFAR(object):
 def main():
     tf.logging.set_verbosity(tf.logging.ERROR)
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
-    # cifar = CIFAR('/backups/work/CIFAR10')
-    # export_cifar('/backups/datasets/cifar-100-python.tar.gz', '/backups/work/CIFAR100', cifar_10=False)
-    # cifar = CIFAR('/backups/work/CIFAR100')
-    # measure_mean_and_std(cifar.train_set, os.path.join(cifar.dataset_path, 'meta.json'), cifar.train_set_size)
     cifar = CIFAR('/backups/work/CIFAR10', shuffle=False, normalize=True, augment=True, one_hot=False)
     dataset = cifar.train_set
-    dataset = dataset.repeat(10)
+    dataset = dataset.batch(50000)
+    dataset = dataset.repeat(1)
     iterator = dataset.make_one_shot_iterator()
     features, labels = iterator.get_next()
     with tf.Session() as sess:
-        for i in range(10):
-            images = sess.run(labels)
-            print(images.shape)
-            print(images)
-            # mean = sess.run(cifar.mean)
-            # std = sess.run(cifar.std)
-            # b = cv2.imread('/backups/work/CIFAR10/train/0/jumbo_jet_s_001462.png')
-            # b = cv2.cvtColor(b, cv2.COLOR_BGR2RGB) / 255.0
-            # for i in range(b.shape[-1]):
-            #     b[:, :, i] = ((b[:, :, i] - mean[i]) / std[i])
-            # for image in images:
-            #     print(images)
-                # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                # cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
-                # cv2.imshow('image', image)
-                # cv2.waitKeyEx(300)
-            pass
+            images_path, labels = sess.run([features, labels])
+            for i in range(50000):
+                if not os.path.dirname(images_path[i]).endswith(str(labels[i])):
+                    print(images_path[i], labels[i])
 
 
 if __name__ == '__main__':
