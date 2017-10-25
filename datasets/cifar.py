@@ -200,7 +200,7 @@ class CIFAR(object):
         """
         measure mean and std of random samples from train set. number of samples is min(50000, train_set_size).
         """
-        num_samples = min(50000, self.train_set_size)
+        num_samples = min(100000, self.train_set_size)
         dataset = self.train_set.shuffle(buffer_size=num_samples)
         dataset = dataset.map(
             self._read_image_func,
@@ -298,10 +298,6 @@ def main():
             if not os.path.dirname(image_path).endswith(str(label)):
                 print(image_path)
                 print(label)
-
-
-if __name__ == '__main__':
-    main()
 
 
 if __name__ == '__main__':
