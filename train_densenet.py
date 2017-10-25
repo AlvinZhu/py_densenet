@@ -30,7 +30,7 @@ import tensorflow as tf
 from tensorflow.python import debug as tfdbg
 
 from datasets.cifar import CIFAR, export_cifar
-from models.dense_net2 import DenseNet
+from models.dense_net import DenseNet
 
 FLAGS = None
 
@@ -42,12 +42,8 @@ def main(unused_argv):
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
     cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True, one_hot=False, batch_size=100)
 
-    # densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
-    #                     total_blocks=3, dropout_rate=0.2, reduction=0.5,
-    #                     weight_decay=1e-4, nesterov_momentum=0.9)
-
     densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
-                        total_blocks=3, keep_prob=0.2, reduction=0.5,
+                        total_blocks=3, dropout_rate=0.2, reduction=0.5,
                         weight_decay=1e-4, nesterov_momentum=0.9)
 
     def train_input_fn(epochs, learning_rate):
@@ -75,7 +71,7 @@ def main(unused_argv):
         model_fn=densenet.cifar_model_fn, model_dir="/backups/work/logs/cifar_model1", config=config)
 
     # Set up logging
-    tensors_to_log = {"accuracy": "train_accuracy"}
+    tensors_to_log = {"accuracy": "Accuracy/train_accuracy"}
     logging_hook = tf.train.LoggingTensorHook(
         tensors=tensors_to_log, every_n_iter=100)
 

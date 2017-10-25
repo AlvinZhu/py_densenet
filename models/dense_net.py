@@ -29,25 +29,34 @@ class DenseNet:
     def __init__(self, num_classes, growth_rate, depth, bc_mode,
                  total_blocks, dropout_rate, reduction,
                  weight_decay, nesterov_momentum):
+        """
+        Class to implement networks from this paper
+        https://arxiv.org/pdf/1611.05552.pdf
+
+        Args:
+            growth_rate: `int`, variable from paper
+            depth: `int`, variable from paper
+            total_blocks: `int`, paper value == 3
+            dropout_rate: `float`, If dropout_rate = 0, dropout will be disables
+            weight_decay: `float`, weight decay for L2 loss, paper = 1e-4
+            nesterov_momentum: `float`, momentum for Nesterov optimizer
+            reduction: `float`, reduction Theta at transition layer for
+                DenseNets with bottleneck layers. See paragraph 'Compression'
+                https://arxiv.org/pdf/1608.06993v3.pdf#4
+            bc_mode: `bool`, should we use bottleneck layers and features
+                reduction or not.
+        """
         self.num_classes = num_classes
         self.growth_rate = growth_rate
         self.depth = depth
         self.bc_mode = bc_mode
         self.first_output_features = growth_rate * 2 if bc_mode else 16
         self.total_blocks = total_blocks
-        self.layers_per_block = (depth - (total_blocks + 1)) // total_blocks
-        if self.bc_mode:
-            self.layers_per_block = self.layers_per_block // 2
         self.reduction = reduction
 
         self.dropout_rate = dropout_rate
-        self.nesterov_momentum = nesterov_momentum
         self.weight_decay = weight_decay
-
-        print("Build DenseNet model with {} blocks, {} bottleneck layers and {} composite layers each.".format(
-            self.total_blocks, self.layers_per_block,
-            self.layers_per_block))
-        print("Reduction at transition layers: {:.1f}".format(self.reduction))
+        self.nesterov_momentum = nesterov_momentum
 
     @staticmethod
     def conv2d(input_, out_features, kernel_size,
@@ -62,10 +71,10 @@ class DenseNet:
 
     @staticmethod
     def avg_pool(input_, k):
-        ksize = [1, k, k, 1]
+        kernel_size = [1, k, k, 1]
         strides = [1, k, k, 1]
         padding = 'VALID'
-        output = tf.nn.avg_pool(input_, ksize, strides, padding)
+        output = tf.nn.avg_pool(input_, kernel_size, strides, padding)
         return output
 
     @staticmethod
@@ -129,7 +138,7 @@ class DenseNet:
         output = input_
         for layer in range(layers_per_block):
             with tf.variable_scope("layer_%d" % layer):
-                output = self.add_layer(input_, growth_rate, training)
+                output = self.add_layer(output, growth_rate, training)
         return output
 
     def transition_layer(self, input_, training):
@@ -149,10 +158,9 @@ class DenseNet:
     @staticmethod
     def fully_connected(input_, out_dim):
         with tf.name_scope('fully_connected'):
-            output = tf.layers.dense(input_,
-                                     out_dim,
-                                     kernel_initializer=tf.contrib.layers.xavier_initializer()
-                                     )
+            output = tf.layers.dense(
+                input_, out_dim,
+                kernel_initializer=tf.contrib.layers.xavier_initializer())
         return output
 
     def classification_layer(self, input_, training):
@@ -212,8 +220,9 @@ class DenseNet:
 
             with tf.variable_scope("Classification_Layer"):
                 logits = self.classification_layer(output, training)
-        probabilities = tf.nn.softmax(logits)
-        classes = tf.argmax(input=probabilities, axis=1)
+        with tf.variable_scope("Predictions"):
+            probabilities = tf.nn.softmax(logits)
+            classes = tf.argmax(input=probabilities, axis=1)
 
         predictions = {
             "classes": classes,
@@ -224,9 +233,10 @@ class DenseNet:
             return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
         # Losses
-        onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=self.num_classes)
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-            logits=logits, labels=onehot_labels))
+        with tf.variable_scope("Loss"):
+            onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=self.num_classes)
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+                logits=logits, labels=onehot_labels))
 
         eval_metric_ops = {
             "accuracy": tf.metrics.accuracy(labels=labels, predictions=classes)
@@ -236,20 +246,23 @@ class DenseNet:
             return tf.estimator.EstimatorSpec(
                 mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
-        l2_loss = tf.add_n(
-            [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
+        with tf.variable_scope("L2_Loss"):
+            l2_loss = tf.add_n(
+                [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
 
         # optimizer and train step
-        optimizer = tf.train.MomentumOptimizer(
-            features['learning_rate'], self.nesterov_momentum, use_nesterov=True)
-        train_op = optimizer.minimize(
-            loss + l2_loss * self.weight_decay,
-            global_step=tf.train.get_global_step())
+        with tf.variable_scope("Train_OP"):
+            optimizer = tf.train.MomentumOptimizer(
+                features['learning_rate'], self.nesterov_momentum, use_nesterov=True)
+            train_op = optimizer.minimize(
+                loss + l2_loss * self.weight_decay,
+                global_step=tf.train.get_global_step())
 
-        correct_prediction = tf.equal(
-            classes,
-            labels)
-        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='train_accuracy')
+        with tf.variable_scope("Accuracy"):
+            correct_prediction = tf.equal(
+                classes,
+                labels)
+            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='train_accuracy')
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             tf.summary.scalar("loss_per_batch", loss)
