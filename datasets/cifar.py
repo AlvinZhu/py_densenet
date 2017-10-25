@@ -187,7 +187,8 @@ class CIFAR(object):
         np.random.shuffle(shuffle_index)
 
         test_files = tf.constant(np.array(all_files['test'])[shuffle_index])
-        test_labels = tf.constant(np.arange(self.num_classes).repeat(test_set_size // self.num_classes)[shuffle_index])
+        test_labels = tf.constant(
+            np.arange(self.num_classes).repeat(test_set_size // self.num_classes)[shuffle_index])
 
         self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
@@ -199,12 +200,12 @@ class CIFAR(object):
         """
         measure mean and std of random samples from train set. number of samples is min(50000, train_set_size).
         """
-        num_samples = min(100000, self.train_set_size)
+        num_samples = min(50000, self.train_set_size)
         dataset = self.train_set.shuffle(buffer_size=num_samples)
         dataset = dataset.map(
             self._read_image_func,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
         dataset = dataset.batch(num_samples)
         iterator = dataset.make_one_shot_iterator()
         images, labels = iterator.get_next()
@@ -212,7 +213,10 @@ class CIFAR(object):
         mean, variance = tf.nn.moments(images, axes=[0, 1, 2])
         std = tf.sqrt(variance)
 
-        with tf.Session() as sess:
+        sess_config = tf.ConfigProto()
+        sess_config.gpu_options.allow_growth = True
+
+        with tf.Session(config=sess_config) as sess:
             out_mean, out_std = sess.run([mean, std])
         self.mean = tf.constant(out_mean)
         self.std = tf.constant(out_std)
@@ -231,9 +235,9 @@ class CIFAR(object):
         return image_float, label
 
     def _augment_func(self, image, label):
-        image_float = tf.random_crop(image, (24, 24, 3))
-        image_float = tf.image.resize_image_with_crop_or_pad(image_float, 32, 32)
-        # image_float = tf.image.random_flip_left_right(image)
+        image_float = tf.image.resize_image_with_crop_or_pad(image, 40, 40)
+        image_float = tf.random_crop(image_float, (32, 32, 3))
+        image_float = tf.image.random_flip_left_right(image_float)
         # image_float = tf.image.random_flip_up_down(image_float)
         return image_float, label
 
@@ -269,12 +273,12 @@ class CIFAR(object):
         self.train_set = self.train_set.map(
             _train_pre_process_fun,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
 
         self.test_set = self.test_set.map(
             _test_pre_process_fun,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
 
         self.train_set = self.train_set.batch(self.batch_size)
         self.test_set = self.test_set.batch(self.batch_size)
@@ -294,6 +298,10 @@ def main():
             if not os.path.dirname(image_path).endswith(str(label)):
                 print(image_path)
                 print(label)
+
+
+if __name__ == '__main__':
+    main()
 
 
 if __name__ == '__main__':

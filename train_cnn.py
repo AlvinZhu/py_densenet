@@ -21,7 +21,7 @@ import numpy as np
 import tensorflow as tf
 
 from datasets.mnist import MNIST
-
+from datasets.cifar import CIFAR
 from models.cnn import cnn_model_fn
 
 tf.logging.set_verbosity(tf.logging.INFO)
@@ -71,7 +71,7 @@ def main1(unused_argv):
 
 def main2(unused_argv):
     # Load training and eval data
-    mnist = MNIST('/home/alvin/Work/MNIST', shuffle=True, normalize=False, augment=False, one_hot=False)
+    mnist = MNIST('/backups/work/mnist', shuffle=True, normalize=True, augment=False, one_hot=False)
 
     def train_input_fn():
         dataset = mnist.train_set
@@ -116,5 +116,53 @@ def main2(unused_argv):
         print(eval_results)
 
 
+def main3(unused_argv):
+    # Load training and eval data
+    cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True, one_hot=False, batch_size=100)
+
+    def train_input_fn():
+        dataset = cifar.train_set
+        # dataset = dataset.skip(16)
+        dataset = dataset.repeat(10)
+        iterator = dataset.make_one_shot_iterator()
+        features, labels = iterator.get_next()
+        return {'x': features}, labels
+
+    def eval_input_fn():
+        dataset = cifar.test_set
+        dataset = dataset.repeat(1)
+        iterator = dataset.make_one_shot_iterator()
+        features, labels = iterator.get_next()
+        return {'x': features}, labels
+
+    # Create the Estimator
+    sess_config = tf.ConfigProto()
+    sess_config.gpu_options.allow_growth = True
+    config = tf.estimator.RunConfig().replace(session_config=sess_config)
+
+    mnist_classifier = tf.estimator.Estimator(
+        model_fn=cnn_model_fn, model_dir="/tmp/logs/cifar_cnn", config=config)
+
+    # Set up logging for predictions
+    # Log the values in the "Softmax" tensor with label "probabilities"
+    # tensors_to_log = {"accuracy": "train_accuracy"}
+    # logging_hook = tf.train.LoggingTensorHook(
+    #     tensors=tensors_to_log, every_n_iter=100)
+
+    tensors_to_log = {"probabilities": "softmax_tensor"}
+    logging_hook = tf.train.LoggingTensorHook(
+        tensors=tensors_to_log, every_n_iter=100)
+
+    for i in range(30):
+        # Train the model
+        mnist_classifier.train(
+            input_fn=train_input_fn,
+            steps=5000)
+
+        # Evaluate the model and print results
+        eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
+        print(eval_results)
+
+
 if __name__ == "__main__":
-    tf.app.run(main=main2)
+    tf.app.run(main=main3)
