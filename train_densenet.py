@@ -30,7 +30,7 @@ import tensorflow as tf
 from tensorflow.python import debug as tfdbg
 
 from datasets.cifar import CIFAR, export_cifar
-from models.dense_net import DenseNet2
+from models.dense_net2 import DenseNet
 
 FLAGS = None
 
@@ -42,13 +42,18 @@ def main(unused_argv):
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
     cifar = CIFAR('/backups/work/CIFAR10', shuffle=True, normalize=True, augment=True, one_hot=False, batch_size=100)
 
-    densenet = DenseNet2(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
-                         total_blocks=3, keep_prob=0.8, reduction=0.5,
-                         weight_decay=1e-4, nesterov_momentum=0.9)
+    # densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
+    #                     total_blocks=3, dropout_rate=0.2, reduction=0.5,
+    #                     weight_decay=1e-4, nesterov_momentum=0.9)
+
+    densenet = DenseNet(num_classes=10, growth_rate=12, depth=100, bc_mode=True,
+                        total_blocks=3, keep_prob=0.2, reduction=0.5,
+                        weight_decay=1e-4, nesterov_momentum=0.9)
 
     def train_input_fn(epochs, learning_rate):
         dataset = cifar.train_set
         dataset = dataset.repeat(epochs)
+        # dataset = dataset.skip(16)
         iterator = dataset.make_one_shot_iterator()
         features, labels = iterator.get_next()
         return {'images': features, 'learning_rate': learning_rate}, labels
@@ -67,10 +72,9 @@ def main(unused_argv):
     config = tf.estimator.RunConfig().replace(session_config=sess_config)
 
     classifier = tf.estimator.Estimator(
-        model_fn=densenet.cifar_model_fn, model_dir="/tmp/logs/cifar_model", config=config)
+        model_fn=densenet.cifar_model_fn, model_dir="/backups/work/logs/cifar_model1", config=config)
 
-    # Set up logging for predictions
-    # Log the values in the "Softmax" tensor with label "probabilities"
+    # Set up logging
     tensors_to_log = {"accuracy": "train_accuracy"}
     logging_hook = tf.train.LoggingTensorHook(
         tensors=tensors_to_log, every_n_iter=100)
@@ -79,42 +83,34 @@ def main(unused_argv):
     # debug_hook.add_tensor_filter("has_inf_or_nan", tfdbg.has_inf_or_nan)
 
     # # Train the model
-    # for i in range(150):
-    #     classifier.train(
-    #         input_fn=lambda: train_input_fn(epochs=1, learning_rate=0.1),
-    #         hooks=[logging_hook]
-    #     )
-    #     eval_results = classifier.evaluate(input_fn=eval_input_fn)
-    #     print(eval_results)
-    #
-    # for i in range(75):
-    #     classifier.train(
-    #         input_fn=lambda: train_input_fn(epochs=1, learning_rate=0.01),
-    #         hooks=[logging_hook]
-    #     )
-    #     eval_results = classifier.evaluate(input_fn=eval_input_fn)
-    #     print(eval_results)
-    #
-    # for i in range(75):
-    #     classifier.train(
-    #         input_fn=lambda: train_input_fn(epochs=1, learning_rate=0.001),
-    #         hooks=[logging_hook]
-    #     )
-    #     eval_results = classifier.evaluate(input_fn=eval_input_fn)
-    #     print(eval_results)
-    #
-    # # Evaluate the model and print results
-    # eval_results = classifier.evaluate(input_fn=eval_input_fn)
-    # print(eval_results)
-
-    for i in range(30):
+    for i in range(20):
         # Train the model
         classifier.train(
             input_fn=lambda: train_input_fn(epochs=10, learning_rate=0.1),
             steps=5000, hooks=[logging_hook])
 
         # Evaluate the model and print results
-        eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=500)
+        eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=100)
+        print(eval_results)
+
+    for i in range(10):
+        # Train the model
+        classifier.train(
+            input_fn=lambda: train_input_fn(epochs=10, learning_rate=0.01),
+            steps=5000, hooks=[logging_hook])
+
+        # Evaluate the model and print results
+        eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=100)
+        print(eval_results)
+
+    for i in range(10):
+        # Train the model
+        classifier.train(
+            input_fn=lambda: train_input_fn(epochs=10, learning_rate=0.001),
+            steps=5000, hooks=[logging_hook])
+
+        # Evaluate the model and print results
+        eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=100)
         print(eval_results)
 
 
