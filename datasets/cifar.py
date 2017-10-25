@@ -286,18 +286,22 @@ class CIFAR(object):
 
 def main():
     tf.logging.set_verbosity(tf.logging.ERROR)
-    # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
-    cifar = CIFAR('/backups/work/CIFAR10', shuffle=False, normalize=True, augment=True, one_hot=False)
-    dataset = cifar.train_set
-    dataset = dataset.batch(50000)
-    dataset = dataset.repeat(1)
+    # export_cifar('/home/alvin/Work/cifar-10-python.tar.gz', '/home/alvin/Work/CIFAR10')
+    cifar = CIFAR('/home/alvin/Work/CIFAR10', shuffle=False, normalize=False, augment=False, one_hot=False)
+    dataset = cifar.test_set
+    dataset = dataset.batch(10000)
     iterator = dataset.make_one_shot_iterator()
-    features, labels = iterator.get_next()
+    features, label = iterator.get_next()
     with tf.Session() as sess:
-            images_path, labels = sess.run([features, labels])
-            for i in range(50000):
-                if not os.path.dirname(images_path[i]).endswith(str(labels[i])):
-                    print(images_path[i], labels[i])
+        images_path, labels = sess.run([features, label])
+        for image_path, label in zip(images_path, labels):
+            if not os.path.dirname(image_path).endswith(str(label)):
+                print(image_path)
+                print(label)
+
+
+if __name__ == '__main__':
+    main()
 
 
 if __name__ == '__main__':

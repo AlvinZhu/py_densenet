@@ -23,84 +23,35 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import shutil
-import pickle
-import tarfile
-import json
 
 import numpy as np
 import tensorflow as tf
 import cv2
 
-
-def unpickle(file_path):
-    # type: (str) -> dict
-    """
-    Unpickle a dict form file.
-    :param file_path: file path.
-    :return: dict.
-    """
-    with open(file_path, 'rb') as fo:
-        data_dict = pickle.load(fo)
-    return data_dict
+from tensorflow.examples.tutorials.mnist import input_data
 
 
-def export_images(file_path, dataset_path, subset='train', cifar_10=True):
-    # type: (str, str, str) -> None
+def export_images(images, labels, dataset_path, subset='train'):
     """
     Export images form dict
-    :param file_path: path of file that contains labels, file names and data of images.
-    :param dataset_path: output path of images.
-    :param subset: train or test set
     """
-    if cifar_10:
-        label_key = 'labels'
-    else:
-        label_key = 'fine_labels'
-    data_dict = unpickle(file_path)
-    for label, file_name, data in zip(data_dict[label_key], data_dict['filenames'], data_dict['data']):
-        image_path = os.path.join(dataset_path, subset, str(label), file_name)
-
-        image = np.reshape(data, (3, 32, 32))
-        image = np.rollaxis(image, 0, 3)[:, :, [2, 1, 0]]
-
+    for i in range(images.shape[0]):
+        image_path = os.path.join(dataset_path, subset, str(labels[i]), '{}.png'.format(i))
+        image = np.reshape(images[i], (28, 28)) * 255
         cv2.imwrite(image_path, image)
 
 
-def export_cifar(tar_path, dataset_path, cifar_10=True, tmp_dir='/tmp'):
-    # type: (str, str, bool, str) -> None
+def export_mnist(src_path, dataset_path):
     """
     Export dataset.
-    :param tar_path: dataset tar.gz file path
+    :param src_path: ubyte.gz files folder.
     :param dataset_path: output path of images.
-    :param cifar_10: dataset type. CIFAR-10 or CIFAR-100.
-    :param tmp_dir: folder to store temporary files.
     """
-    if cifar_10:
-        file_names = {
-            'folder': 'cifar-10-batches-py',
-            'train': 'data_batch_{}',
-            'test': 'test_batch',
-            'meta': 'batches.meta'
-        }
-        num_classes = 10
-    else:
-        file_names = {
-            'folder': 'cifar-100-python',
-            'train': 'train',
-            'test': 'test',
-            'meta': 'meta'
-        }
-        num_classes = 100
-
-    print('Extracting {} to {} ...'.format(tar_path, tmp_dir))
-    with tarfile.open(tar_path) as tar:
-        tar.extractall(tmp_dir)
-
-    tmp_path = os.path.join(tmp_dir, file_names['folder'])
+    print('Reading ubyte.gz files(Maybe downloading) ...')
+    mnist = input_data.read_data_sets(src_path, one_hot=False)
 
     print('Exporting images ...')
-    for i in range(num_classes):
+    for i in range(10):
         train_path = os.path.join(dataset_path, 'train', str(i))
         if not os.path.exists(train_path):
             os.makedirs(train_path)
@@ -109,30 +60,15 @@ def export_cifar(tar_path, dataset_path, cifar_10=True, tmp_dir='/tmp'):
         if not os.path.exists(test_path):
             os.makedirs(test_path)
 
-    if cifar_10:
-        for n in range(5):
-            export_images(os.path.join(tmp_path, file_names['train'].format(n + 1)), dataset_path, 'train', cifar_10)
-    else:
-        export_images(os.path.join(tmp_path, file_names['train']), dataset_path, 'train', cifar_10)
+    train_images = np.vstack((mnist.train.images, mnist.validation.images))
+    train_labels = np.hstack((mnist.train.labels, mnist.validation.labels))
 
-    export_images(os.path.join(tmp_path, file_names['test']), dataset_path, 'test', cifar_10)
+    export_images(train_images, train_labels, dataset_path, 'train')
 
-    print('Exporting meta.json to {} ...'.format(dataset_path))
-    meta_file_path = os.path.join(tmp_path, file_names['meta'])
-    meta_dict = unpickle(meta_file_path)
+    test_images = mnist.test.images
+    test_labels = mnist.test.labels
 
-    if cifar_10:
-        output_dict = {'label_names': meta_dict['label_names']}
-    else:
-        output_dict = {
-            'label_names': meta_dict['fine_label_names'],
-            'coarse_label_names': meta_dict['coarse_label_names']
-        }
-    with open(os.path.join(dataset_path, 'meta.json'), 'w') as f:
-        json.dump(output_dict, f)
-
-    print('Removing temporary files ...')
-    shutil.rmtree(tmp_path)
+    export_images(test_images, test_labels, dataset_path, 'test')
 
 
 class MNIST(object):
@@ -146,6 +82,7 @@ class MNIST(object):
         :param normalize: normalize or not.
         :param augment: augment or not.
         """
+        self.num_classes = 10
         self.dataset_path = dataset_path
         self.num_threads = num_threads
         self.batch_size = batch_size
@@ -160,11 +97,6 @@ class MNIST(object):
 
     def _load(self):
         """Load dataset from folder which contains images."""
-        with open(os.path.join(self.dataset_path, 'meta.json')) as f:
-            meta_dict = json.load(f)
-        self.label_names = meta_dict['label_names']
-        self.num_classes = len(self.label_names)
-
         all_files = {'train': [], 'test': []}
         labels = {'train': [], 'test': []}
         for subset in all_files.keys():
@@ -199,7 +131,7 @@ class MNIST(object):
         """
         measure mean and std of random samples from train set. number of samples is min(50000, train_set_size).
         """
-        num_samples = min(50000, self.train_set_size)
+        num_samples = min(100000, self.train_set_size)
         dataset = self.train_set.shuffle(buffer_size=num_samples)
         dataset = dataset.map(
             self._read_image_func,
@@ -281,33 +213,20 @@ class MNIST(object):
 
 def main():
     tf.logging.set_verbosity(tf.logging.ERROR)
-    # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
-    # cifar = CIFAR('/backups/work/CIFAR10')
-    # export_cifar('/backups/datasets/cifar-100-python.tar.gz', '/backups/work/CIFAR100', cifar_10=False)
-    # cifar = CIFAR('/backups/work/CIFAR100')
-    # measure_mean_and_std(cifar.train_set, os.path.join(cifar.dataset_path, 'meta.json'), cifar.train_set_size)
-    mnist = MNIST('/backups/work/mnist', shuffle=True, normalize=True, augment=True, one_hot=False)
-    dataset = mnist.train_set
-    dataset = dataset.repeat(10)
+    # export_mnist('/home/alvin/Work/MNIST_data', '/home/alvin/Work/MNIST')
+    mnist = MNIST('/home/alvin/Work/MNIST', shuffle=True, normalize=True, augment=True, one_hot=False)
+    dataset = mnist.test_set
+    dataset = dataset.batch(10000)
     iterator = dataset.make_one_shot_iterator()
-    features, labels = iterator.get_next()
+    features, label = iterator.get_next()
     with tf.Session() as sess:
-        for n in range(2):
-            images, labels = sess.run([features, labels])
-            # mean = sess.run(cifar.mean)
-            # std = sess.run(cifar.std)
-            # b = cv2.imread('/backups/work/CIFAR10/train/0/jumbo_jet_s_001462.png')
-            # b = cv2.cvtColor(b, cv2.COLOR_BGR2RGB) / 255.0
-            # for i in range(b.shape[-1]):
-            #     b[:, :, i] = ((b[:, :, i] - mean[i]) / std[i])
-            for i in range(labels.shape[0]):
-                print(labels[i])
-                # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
-                cv2.imshow('image', images[i])
-                cv2.waitKeyEx(0)
-            pass
+        images_path, labels = sess.run([features, label])
+        for image_path, label in zip(images_path, labels):
+            if not os.path.dirname(image_path).endswith(str(label)):
+                print(image_path)
+                print(label)
 
 
 if __name__ == '__main__':
     main()
+
