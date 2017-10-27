@@ -26,32 +26,13 @@ import tensorflow as tf
 
 
 class DenseNet:
-    def __init__(self, num_classes, growth_rate, depth, bc_mode,
-                 total_blocks, dropout_rate, reduction,
-                 weight_decay, nesterov_momentum):
-        """
-        Class to implement networks from this paper
-        https://arxiv.org/pdf/1611.05552.pdf
-
-        Args:
-            growth_rate: `int`, variable from paper
-            depth: `int`, variable from paper
-            total_blocks: `int`, paper value == 3
-            dropout_rate: `float`, If dropout_rate = 0, dropout will be disables
-            weight_decay: `float`, weight decay for L2 loss, paper = 1e-4
-            nesterov_momentum: `float`, momentum for Nesterov optimizer
-            reduction: `float`, reduction Theta at transition layer for
-                DenseNets with bottleneck layers. See paragraph 'Compression'
-                https://arxiv.org/pdf/1608.06993v3.pdf#4
-            bc_mode: `bool`, should we use bottleneck layers and features
-                reduction or not.
-        """
+    def __init__(self, num_classes, growth_rate, bc_mode, block_config, reduction,
+                 dropout_rate, weight_decay, nesterov_momentum):
         self.num_classes = num_classes
         self.growth_rate = growth_rate
-        self.depth = depth
         self.bc_mode = bc_mode
         self.first_output_features = growth_rate * 2 if bc_mode else 16
-        self.total_blocks = total_blocks
+        self.block_config = block_config
         self.reduction = reduction
 
         self.dropout_rate = dropout_rate
@@ -60,21 +41,30 @@ class DenseNet:
 
     @staticmethod
     def conv2d(input_, out_features, kernel_size,
-               strides=(1, 1, 1, 1), padding='SAME'):
+               stride=1, padding='SAME'):
         in_features = int(input_.get_shape()[-1])
         kernel = tf.get_variable(
             name='kernel',
             shape=[kernel_size, kernel_size, in_features, out_features],
             initializer=tf.variance_scaling_initializer())
+        strides = (1, stride, stride, 1)
         output = tf.nn.conv2d(input_, kernel, strides, padding)
         return output
 
     @staticmethod
-    def avg_pool(input_, k):
-        kernel_size = [1, k, k, 1]
-        strides = [1, k, k, 1]
+    def avg_pool(input_, ksize):
+        kernel_size = (1, ksize, ksize, 1)
+        strides = (1, ksize, ksize, 1)
         padding = 'VALID'
         output = tf.nn.avg_pool(input_, kernel_size, strides, padding)
+        return output
+
+    @staticmethod
+    def max_pool(input_, ksize, stride):
+        kernel_size = (1, ksize, ksize, 1)
+        strides = (1, stride, stride, 1)
+        padding = 'VALID'
+        output = tf.nn.max_pool(input_, kernel_size, strides, padding)
         return output
 
     @staticmethod
@@ -133,10 +123,10 @@ class DenseNet:
 
         return output
 
-    def add_dense_block(self, input_, growth_rate, layers_per_block, training):
+    def add_dense_block(self, input_, growth_rate, num_layers, training):
         """Add N H_l internal layers"""
         output = input_
-        for layer in range(layers_per_block):
+        for layer in range(num_layers):
             with tf.variable_scope("layer_%d" % layer):
                 output = self.add_layer(output, growth_rate, training)
         return output
@@ -152,7 +142,7 @@ class DenseNet:
         output = self.composite_function(
             input_, out_features=out_features, kernel_size=1, training=training)
         # run average pooling
-        output = self.avg_pool(output, k=2)
+        output = self.avg_pool(output, ksize=2)
         return output
 
     @staticmethod
@@ -163,7 +153,7 @@ class DenseNet:
                 kernel_initializer=tf.contrib.layers.xavier_initializer())
         return output
 
-    def classification_layer(self, input_, training):
+    def classification_layer(self, input_, num_classes, training):
         """This is last transition to get probabilities by classes. It perform:
         - batch normalization
         - ReLU nonlinearity
@@ -176,50 +166,37 @@ class DenseNet:
         output = tf.nn.relu(output)
         # average pooling
         last_pool_kernel = int(output.get_shape()[-2])
-        output = self.avg_pool(output, k=last_pool_kernel)
+        output = self.avg_pool(output, ksize=last_pool_kernel)
         # FC
         features_total = int(output.get_shape()[-1])
         output = tf.reshape(output, [-1, features_total])
 
-        logits = self.fully_connected(output, self.num_classes)
+        logits = self.fully_connected(output, num_classes)
         return logits
 
-    def cifar_model_fn(self, features, labels, mode):
-        layers_per_block = (self.depth - 4) // 3
-        if self.bc_mode:
-            layers_per_block = layers_per_block // 2
-        growth_rate = self.growth_rate
-        training = tf.constant(mode == tf.estimator.ModeKeys.TRAIN)
-
+    @staticmethod
+    def pre_process(images):
         with tf.variable_scope("Image_Processing"):
-            images = features["images"]
-
-            if mode == tf.estimator.ModeKeys.PREDICT:
                 mean, variance = tf.nn.moments(images, axes=[0, 1, 2])
                 std = tf.sqrt(variance)
                 images = tf.cast(images, tf.float32) / 255.0
                 images = (images - mean) / std
+        return images
 
-            images = tf.image.resize_image_with_crop_or_pad(images, 32, 32)
-        # first - initial 3 x 3 conv to first_output_features
-        with tf.variable_scope("Initial_convolution"):
-            output = self.conv2d(
-                images,
-                out_features=self.first_output_features,
-                kernel_size=3)
-
-        # add N required blocks
+    def forward_pass(self, input_, training):
+        output = input_
         with tf.variable_scope("DenseNet"):
-            for block in range(self.total_blocks):
-                with tf.variable_scope("Dense_Block_%d" % block):
-                    output = self.add_dense_block(output, growth_rate, layers_per_block, training)
-                # last block exist without transition layer
-                if block != self.total_blocks - 1:
-                    with tf.variable_scope("Transition_Layer_%d" % block):
+            for i in range(len(self.block_config)):
+                with tf.variable_scope("Dense_Block_%d" % i):
+                    output = self.add_dense_block(output, self.growth_rate, self.block_config[i], training)
+                if i != len(self.block_config) - 1:
+                    with tf.variable_scope("Transition_Layer_%d" % i):
                         output = self.transition_layer(output, training)
-
             with tf.variable_scope("Classification_Layer"):
-                logits = self.classification_layer(output, training)
+                logits = self.classification_layer(output, self.num_classes, training)
+        return logits
+
+    def model_fn(self, logits, labels, mode, hyper_params):
         with tf.variable_scope("Predictions"):
             probabilities = tf.nn.softmax(logits)
             classes = tf.argmax(input=probabilities, axis=1)
@@ -232,7 +209,6 @@ class DenseNet:
         if mode == tf.estimator.ModeKeys.PREDICT:
             return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
-        # Losses
         with tf.variable_scope("Loss"):
             onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=self.num_classes)
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
@@ -250,25 +226,64 @@ class DenseNet:
             l2_loss = tf.add_n(
                 [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
 
-        # optimizer and train step
         with tf.variable_scope("Train_OP"):
             optimizer = tf.train.MomentumOptimizer(
-                features['learning_rate'], self.nesterov_momentum, use_nesterov=True)
+                hyper_params['learning_rate'], self.nesterov_momentum, use_nesterov=True)
             train_op = optimizer.minimize(
                 loss + l2_loss * self.weight_decay,
                 global_step=tf.train.get_global_step())
 
-        with tf.variable_scope("Accuracy"):
-            correct_prediction = tf.equal(
-                classes,
-                labels)
-            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='train_accuracy')
+        # with tf.variable_scope("Accuracy"):
+        #     correct_prediction = tf.equal(
+        #         classes,
+        #         labels)
+        #     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='train_accuracy')
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             tf.summary.scalar("loss_per_batch", loss)
-            tf.summary.scalar("accuracy_per_batch", accuracy)
+            # tf.summary.scalar("accuracy_per_batch", accuracy)
 
             return tf.estimator.EstimatorSpec(
                 mode=mode,
                 loss=loss,
                 train_op=train_op)
+
+    def cifar_model_fn(self, features, labels, mode):
+        training = tf.constant(mode == tf.estimator.ModeKeys.TRAIN)
+
+        images = features["images"]
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            images = self.pre_process(images)
+        images = tf.image.resize_image_with_crop_or_pad(images, 32, 32)
+
+        with tf.variable_scope("Initial_convolution"):
+            output = self.conv2d(
+                images,
+                out_features=self.first_output_features,
+                kernel_size=3)
+
+        logits = self.forward_pass(output, training)
+
+        return self.model_fn(logits, labels, mode, features)
+
+    def imagenet_model_fn(self, features, labels, mode):
+        training = tf.constant(mode == tf.estimator.ModeKeys.TRAIN)
+
+        images = features["images"]
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            images = self.pre_process(images)
+
+        with tf.variable_scope("Initial_convolution"):
+            output = self.conv2d(
+                images,
+                out_features=self.first_output_features,
+                kernel_size=7,
+                stride=2
+            )
+            output = self.batch_norm(output, training)
+            output = tf.nn.relu(output)
+            output = self.max_pool(output, ksize=3, stride=2)
+
+        logits = self.forward_pass(output, training)
+
+        return self.model_fn(logits, labels, mode, features)
