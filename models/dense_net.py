@@ -69,9 +69,8 @@ class DenseNet:
 
     @staticmethod
     def batch_norm(input_, training):
-        output = tf.contrib.layers.batch_norm(
-            input_, scale=True, is_training=training,
-            updates_collections=None)
+        output = tf.layers.batch_normalization(
+            input_, center=True, scale=True, training=training, fused=True)
         return output
 
     def dropout(self, input_, training):
@@ -199,7 +198,7 @@ class DenseNet:
     def model_fn(self, logits, labels, mode, hyper_params):
         with tf.variable_scope("Predictions"):
             probabilities = tf.nn.softmax(logits)
-            classes = tf.argmax(input=probabilities, axis=1)
+            classes = tf.argmax(input=logits, axis=1)
 
         predictions = {
             "classes": classes,
@@ -227,11 +226,13 @@ class DenseNet:
                 [tf.nn.l2_loss(var) for var in tf.trainable_variables()])
 
         with tf.variable_scope("Train_OP"):
-            optimizer = tf.train.MomentumOptimizer(
-                hyper_params['learning_rate'], self.nesterov_momentum, use_nesterov=True)
-            train_op = optimizer.minimize(
-                loss + l2_loss * self.weight_decay,
-                global_step=tf.train.get_global_step())
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            with tf.control_dependencies(update_ops):
+                optimizer = tf.train.MomentumOptimizer(
+                    hyper_params['learning_rate'], self.nesterov_momentum, use_nesterov=True)
+                train_op = optimizer.minimize(
+                    loss + l2_loss * self.weight_decay,
+                    global_step=tf.train.get_global_step())
 
         # with tf.variable_scope("Accuracy"):
         #     correct_prediction = tf.equal(
@@ -254,7 +255,6 @@ class DenseNet:
         images = features["images"]
         if mode == tf.estimator.ModeKeys.PREDICT:
             images = self.pre_process(images)
-        images = tf.image.resize_image_with_crop_or_pad(images, 32, 32)
 
         with tf.variable_scope("Initial_convolution"):
             output = self.conv2d(

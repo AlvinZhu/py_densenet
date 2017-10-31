@@ -30,6 +30,7 @@ import tensorflow as tf
 from tensorflow.python import debug as tfdbg
 
 from datasets.imagenet import ImageNet
+from datasets.cifar import CIFAR
 from models.dense_net import DenseNet
 
 FLAGS = None
@@ -41,7 +42,9 @@ def main(unused_argv):
     # Load training and eval data
     # export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
     imagenet = ImageNet('/backups/work/ILSVRC2017/ILSVRC',
-                        shuffle=True, normalize=True, augment=True, one_hot=False, batch_size=128)
+                        shuffle=True, normalize=True, augment=False, one_hot=False, batch_size=128)
+    # imagenet = CIFAR('/backups/work/CIFAR10',
+    #                  shuffle=True, normalize=True, augment=True, one_hot=False, batch_size=32)
 
     densenet = DenseNet(num_classes=imagenet.num_classes, growth_rate=12, bc_mode=True, block_config=(6, 12, 24, 16),
                         dropout_rate=0.2, reduction=0.5, weight_decay=1e-4, nesterov_momentum=0.9)

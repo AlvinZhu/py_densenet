@@ -82,7 +82,7 @@ def main(unused_argv):
         # Train the model
         classifier.train(
             input_fn=lambda: train_input_fn(epochs=10, learning_rate=0.1),
-            steps=5000, hooks=[logging_hook])
+            steps=5000)
 
         # Evaluate the model and print results
         eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=100)
@@ -92,7 +92,7 @@ def main(unused_argv):
         # Train the model
         classifier.train(
             input_fn=lambda: train_input_fn(epochs=10, learning_rate=0.01),
-            steps=5000, hooks=[logging_hook])
+            steps=5000)
 
         # Evaluate the model and print results
         eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=100)
@@ -102,7 +102,7 @@ def main(unused_argv):
         # Train the model
         classifier.train(
             input_fn=lambda: train_input_fn(epochs=10, learning_rate=0.001),
-            steps=5000, hooks=[logging_hook])
+            steps=5000)
 
         # Evaluate the model and print results
         eval_results = classifier.evaluate(input_fn=eval_input_fn, steps=100)
