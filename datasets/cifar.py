@@ -135,10 +135,62 @@ def export_cifar(tar_path, dataset_path, cifar_10=True, tmp_dir='/tmp'):
     shutil.rmtree(tmp_path)
 
 
+def measure_mean_and_std(dataset):
+    """
+    measure mean and std of random samples from train set. number of samples is min(50000, train_set_size).
+    :type dataset: dataset object
+    """
+    subset = dataset.train_set
+    num_samples = min(50000, dataset.train_set_size)
+    batch_size = 1000
+
+    def pre_process_fn(filename, label):
+        image, label = dataset.read_image_func(filename, label)
+        shape = tf.shape(image)
+        shorter_edge = tf.minimum(shape[0], shape[1])
+        image = tf.image.resize_image_with_crop_or_pad(image, shorter_edge, shorter_edge)
+        image = tf.image.resize_images(image, (dataset.image_shape[0], dataset.image_shape[1]))
+        return image, label
+    subset = subset.map(
+        pre_process_fn,
+        num_threads=dataset.num_threads,
+        output_buffer_size=2 * dataset.batch_size)
+    subset = subset.batch(batch_size)
+    iterator = subset.make_one_shot_iterator()
+    images, labels = iterator.get_next()
+
+    mean, variance = tf.nn.moments(images, axes=[0, 1, 2])
+    std = tf.sqrt(variance)
+
+    sess_config = tf.ConfigProto()
+    sess_config.gpu_options.allow_growth = True
+
+    with tf.Session(config=sess_config) as sess:
+        out_mean = np.zeros([dataset.image_shape[2]])
+        out_std = np.zeros([dataset.image_shape[2]])
+
+        for i in range(num_samples // batch_size):
+            tmp_mean, tmp_std = sess.run([mean, std])
+            out_mean += tmp_mean
+            out_std += tmp_std
+
+        out_mean /= num_samples // batch_size
+        out_std /= num_samples // batch_size
+
+        print('mean:{}, std:{}'.format(out_mean, out_std))
+
+    with open(os.path.join(dataset.dataset_path, 'meta.json')) as f:
+        meta_dict = json.load(f)
+    meta_dict['mean'] = out_mean.tolist()
+    meta_dict['std'] = out_std.tolist()
+
+    with open(os.path.join(dataset.dataset_path, 'meta.json'), 'w') as f:
+        json.dump(meta_dict, f)
+
+
 class CIFAR(object):
-    def __init__(self, dataset_path, num_threads=8, batch_size=64,
-                 shuffle=True, normalize=True, augment=True, one_hot=True):
-        # type: (str, int) -> CIFAR
+    def __init__(self, dataset_path, image_shape=(32, 32, 3), num_threads=8, batch_size=128,
+                 shuffle=True, normalize=True, augment=True, one_hot=False, read=True):
         """
         :param dataset_path: The dataset folder path.
         :param num_threads: number of threads.
@@ -147,6 +199,8 @@ class CIFAR(object):
         :param normalize: normalize or not.
         :param augment: augment or not.
         """
+        self.image_shape = image_shape
+        self.read = read
         self.dataset_path = dataset_path
         self.num_threads = num_threads
         self.batch_size = batch_size
@@ -156,8 +210,8 @@ class CIFAR(object):
         self.one_hot = one_hot
 
         self._load()
-        self._measure_mean_and_std()
-        self._pre_process()
+        if self.read:
+            self._pre_process()
 
     def _load(self):
         """Load dataset from folder which contains images."""
@@ -166,11 +220,21 @@ class CIFAR(object):
         self.label_names = meta_dict['label_names']
         self.num_classes = len(self.label_names)
 
+        if 'mean' in meta_dict and 'std' in meta_dict:
+            self.mean = tf.constant(meta_dict['mean'])
+            self.std = tf.constant(meta_dict['std'])
+        else:
+            # self.normalize = False
+            self.mean = tf.constant(0.0)
+            self.std = tf.constant(1.0)
+
         all_files = {'train': [], 'test': []}
+        labels = {'train': [], 'test': []}
         for subset in all_files.keys():
             for i in range(self.num_classes):
                 folder = os.path.join(self.dataset_path, subset, str(i))
                 files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.png')]
+                labels[subset] += [i] * len(files)
                 all_files[subset] += files
 
         train_set_size = len(all_files['train'])
@@ -180,15 +244,13 @@ class CIFAR(object):
         np.random.shuffle(shuffle_index)
 
         train_files = tf.constant(np.array(all_files['train'])[shuffle_index])
-        train_labels = tf.constant(
-            np.arange(self.num_classes).repeat(train_set_size // self.num_classes)[shuffle_index])
+        train_labels = tf.constant(np.array(labels['train'])[shuffle_index])
 
         shuffle_index = np.arange(test_set_size)
         np.random.shuffle(shuffle_index)
 
         test_files = tf.constant(np.array(all_files['test'])[shuffle_index])
-        test_labels = tf.constant(
-            np.arange(self.num_classes).repeat(test_set_size // self.num_classes)[shuffle_index])
+        test_labels = tf.constant(np.array(labels['test'])[shuffle_index])
 
         self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
@@ -196,52 +258,26 @@ class CIFAR(object):
         self.test_set = tf.contrib.data.Dataset.from_tensor_slices((test_files, test_labels))
         self.test_set_size = test_set_size
 
-    def _measure_mean_and_std(self):
-        """
-        measure mean and std of random samples from train set. number of samples is min(50000, train_set_size).
-        """
-        num_samples = min(100000, self.train_set_size)
-        dataset = self.train_set.shuffle(buffer_size=num_samples)
-        dataset = dataset.map(
-            self._read_image_func,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
-        dataset = dataset.batch(num_samples)
-        iterator = dataset.make_one_shot_iterator()
-        images, labels = iterator.get_next()
-
-        mean, variance = tf.nn.moments(images, axes=[0, 1, 2])
-        std = tf.sqrt(variance)
-
-        sess_config = tf.ConfigProto()
-        sess_config.gpu_options.allow_growth = True
-
-        with tf.Session(config=sess_config) as sess:
-            out_mean, out_std = sess.run([mean, std])
-        self.mean = tf.constant(out_mean)
-        self.std = tf.constant(out_std)
-
-    def _read_image_func(self, filename, label):
+    def read_image_func(self, filename, label):
         image_string = tf.read_file(filename)
-        image_decoded = tf.image.decode_image(image_string)
+        image_decoded = tf.image.decode_png(image_string, channels=self.image_shape[2])
         image_decoded = tf.reverse(image_decoded, axis=[-1])
         image_float = tf.image.convert_image_dtype(image_decoded, tf.float32)
-        image_float.set_shape([32, 32, 3])
         return image_float, label
 
-    def _normalize_func(self, image, label):
-        image_float = (image - self.mean) / self.std
-        # image_float = tf.image.per_image_standardization(image)
+    def normalize_func(self, image, label):
+        # image_float = (image - self.mean) / self.std
+        image_float = tf.image.per_image_standardization(image)
         return image_float, label
 
-    def _augment_func(self, image, label):
-        image_float = tf.image.resize_image_with_crop_or_pad(image, 40, 40)
-        image_float = tf.random_crop(image_float, (32, 32, 3))
-        image_float = tf.image.random_flip_left_right(image_float)
-        # image_float = tf.image.random_flip_up_down(image_float)
-        return image_float, label
+    def augment_func(self, image, label):
+        image = tf.image.resize_image_with_crop_or_pad(image, self.image_shape[0] + 8, self.image_shape[1] + 8)
+        image = tf.random_crop(image, self.image_shape)
+        image = tf.image.random_flip_left_right(image)
+        # image = tf.image.random_flip_up_down(image)
+        return image, label
 
-    def _one_hot_func(self, image, label):
+    def one_hot_func(self, image, label):
         onehot_label = tf.one_hot(indices=tf.cast(label, tf.int32), depth=self.num_classes)
         return image, onehot_label
 
@@ -253,21 +289,27 @@ class CIFAR(object):
             self.train_set = self.train_set.take(self.train_set_size)
 
         def _train_pre_process_fun(filename, label):
-            image, label = self._read_image_func(filename, label)
+            image, label = self.read_image_func(filename, label)
             if self.normalize:
-                image, label = self._normalize_func(image, label)
+                image, label = self.normalize_func(image, label)
             if self.augment:
-                image, label = self._augment_func(image, label)
+                image, label = self.augment_func(image, label)
+            else:
+                image = tf.image.resize_images(image, (self.image_shape[0], self.image_shape[1]))
+            image.set_shape(self.image_shape)
+            image = tf.image.resize_images(image, (224, 224))
             if self.one_hot:
-                image, label = self._one_hot_func(image, label)
+                image, label = self.one_hot_func(image, label)
             return image, label
 
         def _test_pre_process_fun(filename, label):
-            image, label = self._read_image_func(filename, label)
+            image, label = self.read_image_func(filename, label)
             if self.normalize:
-                image, label = self._normalize_func(image, label)
+                image, label = self.normalize_func(image, label)
+            image.set_shape(self.image_shape)
+            image = tf.image.resize_images(image, (224, 224))
             if self.one_hot:
-                image, label = self._one_hot_func(image, label)
+                image, label = self.one_hot_func(image, label)
             return image, label
 
         self.train_set = self.train_set.map(
@@ -284,21 +326,28 @@ class CIFAR(object):
         self.test_set = self.test_set.batch(self.batch_size)
 
 
+def main_prepare_dataset():
+    export_cifar('/backups/datasets/cifar-10-python.tar.gz', '/backups/work/CIFAR10')
+    cifar = CIFAR('/backups/work/CIFAR10', read=False)
+    measure_mean_and_std(cifar)
+
+
 def main():
     tf.logging.set_verbosity(tf.logging.ERROR)
-    # export_cifar('/home/alvin/Work/cifar-10-python.tar.gz', '/home/alvin/Work/CIFAR10')
-    cifar = CIFAR('/home/alvin/Work/CIFAR10', shuffle=False, normalize=False, augment=False, one_hot=False)
+    cifar = CIFAR('/backups/work/CIFAR10', shuffle=False, normalize=False, augment=False, one_hot=False)
     dataset = cifar.test_set
-    dataset = dataset.batch(10000)
+    dataset = dataset.repeat(1)
     iterator = dataset.make_one_shot_iterator()
     features, label = iterator.get_next()
     with tf.Session() as sess:
-        images_path, labels = sess.run([features, label])
-        for image_path, label in zip(images_path, labels):
-            if not os.path.dirname(image_path).endswith(str(label)):
-                print(image_path)
-                print(label)
+        images, labels = sess.run([features, label])
+        for image, label in zip(images, labels):
+            print(cifar.label_names[label])
+            cv2.namedWindow('image', cv2.WINDOW_GUI_EXPANDED)
+            cv2.imshow('image', image)
+            cv2.waitKeyEx(0)
 
 
 if __name__ == '__main__':
+    # main_prepare_dataset()
     main()

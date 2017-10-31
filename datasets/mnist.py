@@ -136,7 +136,7 @@ class MNIST(object):
         dataset = dataset.map(
             self._read_image_func,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
         dataset = dataset.batch(num_samples)
         iterator = dataset.make_one_shot_iterator()
         images, labels = iterator.get_next()
@@ -144,15 +144,17 @@ class MNIST(object):
         mean, variance = tf.nn.moments(images, axes=[0, 1, 2])
         std = tf.sqrt(variance)
 
-        with tf.Session() as sess:
+        sess_config = tf.ConfigProto()
+        sess_config.gpu_options.allow_growth = True
+
+        with tf.Session(config=sess_config) as sess:
             out_mean, out_std = sess.run([mean, std])
         self.mean = tf.constant(out_mean)
         self.std = tf.constant(out_std)
 
     def _read_image_func(self, filename, label):
         image_string = tf.read_file(filename)
-        image_decoded = tf.image.decode_image(image_string)
-        # image_float = tf.cast(image_decoded, tf.float32)
+        image_decoded = tf.image.decode_png(image_string, channels=1)
         image_float = tf.image.convert_image_dtype(image_decoded, tf.float32)
         return image_float, label
 
@@ -162,14 +164,14 @@ class MNIST(object):
         return image_float, label
 
     def _augment_func(self, image, label):
-        image = tf.random_crop(image, (20, 20, 1))
-        image = tf.image.resize_image_with_crop_or_pad(image, 28, 28)
-        # image_float = tf.image.random_flip_left_right(image)
-        # image_float = tf.image.random_flip_up_down(image_float)
+        image = tf.image.resize_image_with_crop_or_pad(image, 36, 36)
+        image = tf.random_crop(image, (28, 28, 1))
+        image = tf.image.random_flip_left_right(image)
+        # image = tf.image.random_flip_up_down(image)
         return image, label
 
     def _one_hot_func(self, image, label):
-        onehot_label = tf.one_hot(indices=tf.cast(label, tf.int32), depth=10)
+        onehot_label = tf.one_hot(indices=tf.cast(label, tf.int32), depth=self.num_classes)
         return image, onehot_label
 
     def _pre_process(self):
@@ -200,15 +202,15 @@ class MNIST(object):
         self.train_set = self.train_set.map(
             _train_pre_process_fun,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
 
         self.test_set = self.test_set.map(
             _test_pre_process_fun,
             num_threads=self.num_threads,
-            output_buffer_size=self.num_threads + self.batch_size)
+            output_buffer_size=2 * self.batch_size)
 
-        self.train_set = self.train_set.batch(100)
-        self.test_set = self.test_set.batch(128)
+        self.train_set = self.train_set.batch(self.batch_size)
+        self.test_set = self.test_set.batch(self.batch_size)
 
 
 def main():
