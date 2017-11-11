@@ -252,10 +252,10 @@ class CIFAR(object):
         test_files = tf.constant(np.array(all_files['test'])[shuffle_index])
         test_labels = tf.constant(np.array(labels['test'])[shuffle_index])
 
-        self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
+        self.train_set = tf.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
 
-        self.test_set = tf.contrib.data.Dataset.from_tensor_slices((test_files, test_labels))
+        self.test_set = tf.data.Dataset.from_tensor_slices((test_files, test_labels))
         self.test_set_size = test_set_size
 
     def read_image_func(self, filename, label):
@@ -297,7 +297,6 @@ class CIFAR(object):
             else:
                 image = tf.image.resize_images(image, (self.image_shape[0], self.image_shape[1]))
             image.set_shape(self.image_shape)
-            image = tf.image.resize_images(image, (224, 224))
             if self.one_hot:
                 image, label = self.one_hot_func(image, label)
             return image, label
@@ -307,20 +306,17 @@ class CIFAR(object):
             if self.normalize:
                 image, label = self.normalize_func(image, label)
             image.set_shape(self.image_shape)
-            image = tf.image.resize_images(image, (224, 224))
             if self.one_hot:
                 image, label = self.one_hot_func(image, label)
             return image, label
 
         self.train_set = self.train_set.map(
             _train_pre_process_fun,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
+            num_parallel_calls=self.num_threads)
 
         self.test_set = self.test_set.map(
             _test_pre_process_fun,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
+            num_parallel_calls=self.num_threads)
 
         self.train_set = self.train_set.batch(self.batch_size)
         self.test_set = self.test_set.batch(self.batch_size)

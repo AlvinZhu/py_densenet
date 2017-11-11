@@ -121,10 +121,10 @@ class MNIST(object):
         test_files = tf.constant(np.array(all_files['test'])[shuffle_index])
         test_labels = tf.constant(np.array(labels['test'])[shuffle_index])
 
-        self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
+        self.train_set = tf.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
 
-        self.test_set = tf.contrib.data.Dataset.from_tensor_slices((test_files, test_labels))
+        self.test_set = tf.data.Dataset.from_tensor_slices((test_files, test_labels))
         self.test_set_size = test_set_size
 
     def _measure_mean_and_std(self):
@@ -201,13 +201,11 @@ class MNIST(object):
 
         self.train_set = self.train_set.map(
             _train_pre_process_fun,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
+            num_parallel_calls=self.num_threads)
 
         self.test_set = self.test_set.map(
             _test_pre_process_fun,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
+            num_parallel_calls=self.num_threads)
 
         self.train_set = self.train_set.batch(self.batch_size)
         self.test_set = self.test_set.batch(self.batch_size)

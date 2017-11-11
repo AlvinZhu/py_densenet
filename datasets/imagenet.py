@@ -22045,10 +22045,10 @@ class ImageNet(object):
         val_files = tf.constant(np.array(val_set['images'])[shuffle_index])
         val_labels = tf.constant(np.array(val_set['labels'])[shuffle_index])
 
-        self.train_set = tf.contrib.data.Dataset.from_tensor_slices((train_files, train_labels))
+        self.train_set = tf.data.Dataset.from_tensor_slices((train_files, train_labels))
         self.train_set_size = train_set_size
 
-        self.val_set = tf.contrib.data.Dataset.from_tensor_slices((val_files, val_labels))
+        self.val_set = tf.data.Dataset.from_tensor_slices((val_files, val_labels))
         self.val_set_size = val_set_size
 
     def read_image_func(self, filename, label):
@@ -22122,13 +22122,11 @@ class ImageNet(object):
 
         self.train_set = self.train_set.map(
             _train_pre_process_fun,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
+            num_parallel_calls=self.num_threads)
 
         self.val_set = self.val_set.map(
             _val_pre_process_fun,
-            num_threads=self.num_threads,
-            output_buffer_size=2 * self.batch_size)
+            num_parallel_calls=self.num_threads)
 
         self.train_set = self.train_set.batch(self.batch_size)
         self.val_set = self.val_set.batch(self.batch_size)
