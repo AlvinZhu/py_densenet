@@ -39,6 +39,6 @@ Citation:
 ## Dependencies
 
 - Model was tested with Python 2.7 with and without CUDA.
-- Model should work as expected with TensorFlow >= 1.3. 
+- Model should work as expected with TensorFlow >= 1.4. 
 
 Repo supported with requirements file - so the easiest way to install all just run `pip install -r requirements.txt`.
