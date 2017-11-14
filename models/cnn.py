@@ -108,7 +108,6 @@ def cnn_model_fn(features, labels, mode):
         train_op = optimizer.minimize(
             loss=loss,
             global_step=tf.train.get_global_step())
-        tf.summary.scalar("loss_per_batch", loss)
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
     # Add evaluation metrics (for EVAL mode)
